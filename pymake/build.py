@@ -1,13 +1,37 @@
 import time
-class Build(object):
-    
-    def __init__(self, srcattrs, *args, **kwargs):
-        self.src_attrs = srcattrs
-        self.srcs = kwargs
+import os
 
-    def build(self):
+class SrcConf:
+    def __init__(self, collection=None, childdir=''):
+        self.collection = collection
+        self.childdir = childdir
+
+class Build:
+    
+    srcs_setup = {}
+    
+    def __init__(self, *args, **kwargs):
+        self.srcs = kwargs
+        self.res = None
+        self.srcres = None
+        self.builddir = None
+
+    def build(self, builddir=None):
         start = time.time()
-        pass
+        if builddir is None:
+            if 'BUILDDIR' not in os.environ:
+                os.environ['BUILDDIR'] = os.getcwd()
+                
+            builddir = os.environ['BUILDDIR']
+            
+        self.builddir = builddir
+        
+        self.srcres = self.build_srcs()
+         
+        if self.outdated():
+            self.res = self.rebuild()
+        
+        return self.res
 
     def build_src_def(self, name, src):
         if hasattr(src, 'build'):
@@ -17,10 +41,9 @@ class Build(object):
         
         return res
 
-
-    def build_src_collection(self, name, src, key, collection_type):
-        setup_fname = "setup_src_{0}_{1}".format(str(name), collection_type)
-        build_fname = "build_src_{0}_{1}".format(str(name), collection_type)
+    def build_src_collection(self, name, src, key):
+        setup_fname = "setup_src_{0}_item".format(str(name))
+        build_fname = "build_src_{0}_item".format(str(name))
         
         if hasattr(self, setup_fname):
             src[key] = getattr(self, setup_fname)(src, key) 
@@ -34,7 +57,7 @@ class Build(object):
 
     def build_src(self, name, src, key=None):
 
-#         self.setup_builddir_for_src(name)
+        self.setup_builddir_for_src(name)
 
         if hasattr(self, "setup_src_" + str(name)):
             src = getattr(self, "setup_src_" + str(name))(src)
@@ -42,23 +65,95 @@ class Build(object):
         if hasattr(self, "build_src_" + str(name)):
             res = getattr(self, "build_src_" + str(name))(src)
         else:
-            if name in self.src_attrs:
-                if self.src_attrs[name] is list:
+            if name in self.srcs_setup:
+                if self.srcs_setup[name].collection == 'list':
                     res = []
                     for key in range(len(src)):
-                        res.append(self.build_src_collection(name, src, key, collection_type))
-                elif self.src_attrs[name] is dict:
+                        res.append(self.build_src_collection(name, src, key))
+                elif self.srcs_setup[name].collection == 'dict':
                     res = {}
                     for key in src:
-                        res[key] = self.build_src_collection(name, src, key, collection_type)
+                        res[key] = self.build_src_collection(name, src, key)
             else:
                 res = self.build_src_def(str(name), src)
         
-        self.reset_env()
+        os.environ['BUILDDIR'] = self.builddir
         
         return res
 
+    def setup_builddir_for_src(self, name):
+        if name in self.srcs_setup:
+            childdir = self.srcs_setup[name].childdir
+        else:
+            childdir = ''
+        os.environ['BUILDDIR'] = os.path.join(os.environ['BUILDDIR'], childdir.format(name=name))
+
     def build_srcs(self):
+        srcres = {}
         if self.srcs:
             for name, src in self.srcs.items():
-                self.res[name] = self.build_src(name, src)
+                srcres[name] = self.build_src(name, src)
+                
+        return srcres
+
+    def get_timestamp(self):
+        oldest_t_time = None
+        newest_t_time = None
+        for t in self.targets:
+            timestamp = None
+            
+            if hasattr(t, 'get_timestamp'):
+                timestamp = t.get_timestamp()
+#             else:
+#                 if os.path.exists(t):
+#                     timestamp = os.path.getmtime(t)
+#                 else:
+#                     return float('-inf')
+            
+            try:
+                oldest = timestamp[0]
+                newest =  timestamp[1]
+            except TypeError:
+                oldest = newest = timestamp
+
+            if (oldest is not None) and ((oldest_t_time is None) or (oldest_t_time > oldest)):
+                oldest_t_time = oldest
+            
+            if (newest is not None) and ((newest_t_time is None) or (newest_t_time < newest)):
+                newest_t_time = newest
+                
+        return oldest_t_time, newest_t_time
+
+    def outdated(self):
+        if self.res:
+            timestamp = self.get_timestamp()
+            
+            try:
+                oldest_t = timestamp[0]
+            except TypeError:
+                oldest_t = timestamp
+            
+            if oldest_t == float("-inf"):
+                return True
+            
+            for name, res in self.res.items():
+                try:
+                    collection_type = self.src_properties[name]['collection']
+                except KeyError:
+                    collection_type = None
+                    
+                if collection_type:
+                    if collection_type  == 'list':
+                        for key in range(len(res)):
+                            if self.is_src_outdated(res[key], oldest_t):
+                                return True
+                    elif collection_type == 'dict':
+                        for key in res:
+                            if self.is_src_outdated(res[key], oldest_t):
+                                return True
+                else:
+                    if self.is_src_outdated(res, oldest_t):
+                        return True
+
+        return False
+
