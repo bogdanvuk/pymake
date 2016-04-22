@@ -1,18 +1,39 @@
-from pymake.builds.fileset import Fileset
+from pymake.builds.fileset import Fileset, FilesetBuild
 from subprocess import call
 import subprocess
 from pymake.utils import resolve_path
 from pymake.builds.interact import Interact
 from pymake.builds.vivado_hls import VivadoHlsInteract
+import os
 
-def test_fileset():
-    f = Fileset(match = ['*.py'])
-    fileset_files = f.build()
-     
-    ret = subprocess.check_output(['find', '-name', '*.py'], universal_newlines=True)
+
+def check_fileset(fs, match):
+    ret = subprocess.check_output(['find', '-name', match], universal_newlines=True)
     find_files_rel = ret.split('\n')[:-1]
     find_files = [resolve_path(f) for f in find_files_rel]
-    assert set(fileset_files) == set(find_files) 
+    assert set(fs) == set(find_files)
+
+def test_fileset():
+    try:
+        os.remove('dummy.py')
+    except FileNotFoundError:
+        pass
+    
+    f = FilesetBuild(match = ['*.py'])
+    f.clean()
+    fileset_files = f.build()
+    assert f.rebuilt
+    check_fileset(fileset_files, '*.py')
+    
+    fileset_files = f.build()
+    assert f.rebuilt == False
+    
+    with open('dummy.py', 'w'):
+        pass
+    
+    fileset_files = f.build()
+    assert f.rebuilt
+    check_fileset(fileset_files, '*.py')
 
 def test_interact():
     b = VivadoHlsInteract()
@@ -26,5 +47,5 @@ def test_interact():
     vivado_hls_files = [resolve_path(f) for f in vivado_hls_files_rel]
     assert set(vivado_hls_files) == set(find_files) 
     
-# test_fileset()
-test_interact()
+test_fileset()
+# test_interact()

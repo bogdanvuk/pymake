@@ -16,6 +16,30 @@ class Build:
         self.srcres = None
         self.builddir = None
 
+    def clean(self, builddir=None):
+        if builddir is None:
+            if 'BUILDDIR' not in os.environ:
+                os.environ['BUILDDIR'] = os.getcwd()
+                
+            builddir = os.environ['BUILDDIR']
+            
+        self.builddir = builddir
+        self.srcres = self.build_srcs()
+        self.res = self.load()
+        self.targets = self.set_targets()
+        self.clean_targets()
+
+    def clean_targets(self):
+        for t in self.targets:
+            if hasattr(t, 'clean'):
+                t.clean()
+
+    def load(self):
+        pass
+    
+    def set_targets(self):
+        pass
+
     def build(self, builddir=None):
         start = time.time()
         if builddir is None:
@@ -28,8 +52,15 @@ class Build:
         
         self.srcres = self.build_srcs()
          
+        self.res = self.load()
+        
+        self.targets = self.set_targets()
+        
         if self.outdated():
+            self.rebuilt = True
             self.res = self.rebuild()
+        else:
+            self.rebuilt = False
         
         return self.res
 
@@ -57,7 +88,7 @@ class Build:
 
     def build_src(self, name, src, key=None):
 
-        self.setup_builddir_for_src(name)
+#         self.setup_builddir_for_src(name)
 
         if hasattr(self, "setup_src_" + str(name)):
             src = getattr(self, "setup_src_" + str(name))(src)
@@ -77,7 +108,7 @@ class Build:
             else:
                 res = self.build_src_def(str(name), src)
         
-        os.environ['BUILDDIR'] = self.builddir
+#         os.environ['BUILDDIR'] = self.builddir
         
         return res
 
@@ -96,14 +127,15 @@ class Build:
                 
         return srcres
 
-    def get_timestamp(self):
+    @property
+    def timestamp(self):
         oldest_t_time = None
         newest_t_time = None
         for t in self.targets:
             timestamp = None
             
-            if hasattr(t, 'get_timestamp'):
-                timestamp = t.get_timestamp()
+            if hasattr(t, 'timestamp'):
+                timestamp = t.timestamp
 #             else:
 #                 if os.path.exists(t):
 #                     timestamp = os.path.getmtime(t)
@@ -124,9 +156,34 @@ class Build:
                 
         return oldest_t_time, newest_t_time
 
+    def is_src_outdated(self, name, oldest_t, key = None):
+        if key:
+            src = self.srcs[name][key]
+            srcres = self.srcres[name][key]
+        else:
+            src = self.srcs[name]
+            srcres = self.srcres[name]
+        
+        if hasattr(src, 'rebuilt'):
+            if src.rebuilt:
+                return True
+        
+        if oldest_t:
+            timestamp = None
+            if hasattr(srcres, 'timestamp'):
+                timestamp = srcres.timestamp
+                                
+            try:
+                newest =  timestamp[1]
+            except TypeError:
+                newest = timestamp
+            
+            if (newest is not None) and (newest > oldest_t):
+                return True
+
     def outdated(self):
         if self.res:
-            timestamp = self.get_timestamp()
+            timestamp = self.timestamp
             
             try:
                 oldest_t = timestamp[0]
@@ -136,23 +193,18 @@ class Build:
             if oldest_t == float("-inf"):
                 return True
             
-            for name, res in self.res.items():
-                try:
-                    collection_type = self.src_properties[name]['collection']
-                except KeyError:
-                    collection_type = None
-                    
-                if collection_type:
-                    if collection_type  == 'list':
+            for name, res in self.srcres.items():
+                if name in self.srcs_setup:
+                    if self.srcs_setup[name].collection == 'list':
                         for key in range(len(res)):
-                            if self.is_src_outdated(res[key], oldest_t):
+                            if self.is_src_outdated(name, oldest_t, key):
                                 return True
-                    elif collection_type == 'dict':
+                    elif self.srcs_setup[name].collection == 'dict':
                         for key in res:
-                            if self.is_src_outdated(res[key], oldest_t):
+                            if self.is_src_outdated(name, oldest_t, key):
                                 return True
                 else:
-                    if self.is_src_outdated(res, oldest_t):
+                    if self.is_src_outdated(name, oldest_t):
                         return True
 
         return False

@@ -1,5 +1,6 @@
 from pymake.build import Build
 import pexpect
+import sys
 
 class InteractInst:
     def __init__(self, runcmd, prompt):
@@ -8,20 +9,22 @@ class InteractInst:
         self.p = None
     
     def open(self):
-        self.p = pexpect.spawn(self.runcmd)
+        self.p = pexpect.spawnu(self.runcmd)
+#         self.p.logfile = sys.stdout
         self.p.expect(self.prompt)
-        self.hdr = self.p.before.decode()
+        self.hdr = self.p.before
     
     def close(self):
         if self.p and self.p.isalive():
             self.p.sendeof()
             self.p.terminate(True)
     
-    def cmd(self, text):
-        self.p.sendline(text)
-        self.p.expect(self.prompt)
+    def cmd(self, text, timeout=-1):
+        if text:
+            self.p.sendline(text)
+        self.p.expect(self.prompt, timeout=timeout)
         self.p.flush()
-        return self.p.before.decode()
+        return self.p.before
     
     def __del__(self):
         self.close()
