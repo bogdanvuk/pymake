@@ -1,4 +1,4 @@
-from pymake.builds.fileset import Fileset, FilesetBuild
+from pymake.builds.fileset import Fileset, FilesetBuild, FileBuild
 from subprocess import call
 import subprocess
 from pymake.utils import resolve_path
@@ -20,20 +20,27 @@ def test_fileset():
         pass
     
     f = FilesetBuild(match = ['*.py'])
-    f.clean()
-    fileset_files = f.build()
+    f.clean('fileset_test')
+    fileset_files = f.build('fileset_test')
     assert f.rebuilt
     check_fileset(fileset_files, '*.py')
     
-    fileset_files = f.build()
+    fileset_files = f.build('fileset_test')
     assert f.rebuilt == False
     
     with open('dummy.py', 'w'):
         pass
     
-    fileset_files = f.build()
+    fileset_files = f.build('fileset_test')
     assert f.rebuilt
     check_fileset(fileset_files, '*.py')
+
+def test_fileset2():
+    f = FilesetBuild(match=['./src/*.cpp', './src/*.hpp'], ignore=['*/tb*.cpp'], root=FileBuild('$BUILDDIR/test_vivado_hls'))
+    f.clean('fileset_test2')
+    fileset_files = f.build('fileset_test2')
+    pass
+    
 
 def test_interact():
     b = VivadoHlsInteract()
@@ -47,5 +54,5 @@ def test_interact():
     vivado_hls_files = [resolve_path(f) for f in vivado_hls_files_rel]
     assert set(vivado_hls_files) == set(find_files) 
     
-test_fileset()
+test_fileset2()
 # test_interact()

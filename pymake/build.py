@@ -1,5 +1,9 @@
 import time
 import os
+from collections import OrderedDict
+import pickle
+import zlib
+from pymake.utils import File
 
 class SrcConf:
     def __init__(self, collection=None, childdir=''):
@@ -8,21 +12,25 @@ class SrcConf:
 
 class Build:
     
-    srcs_setup = {}
+    srcs_setup = OrderedDict()
     
     def __init__(self, *args, **kwargs):
-        self.srcs = kwargs
+        self.srcs = OrderedDict()
+        for s in self.srcs_setup:
+            self.srcs[s] = kwargs[s]
+
         self.res = None
         self.srcres = None
         self.builddir = None
 
-    def clean(self, builddir=None):
+    def clean(self, name, builddir=None):
         if builddir is None:
             if 'BUILDDIR' not in os.environ:
                 os.environ['BUILDDIR'] = os.getcwd()
                 
             builddir = os.environ['BUILDDIR']
-            
+        
+        self.name = name
         self.builddir = builddir
         self.srcres = self.build_srcs()
         self.res = self.load()
@@ -35,24 +43,41 @@ class Build:
                 t.clean()
 
     def load(self):
-        pass
+        res = None
+        srchash = None
+        self.res_file = self.get_pickle()
+        
+        if self.res_file.exists:
+            try:
+                (srchash, res) = self.res_file.load()
+            except Exception as e:
+#                 print(e.msg)
+                pass
+            
+        return srchash, res
+    
+    def dump(self):
+        self.res_file.dump((self.get_hash(self.srcres), self.res))
     
     def set_targets(self):
         pass
 
-    def build(self, builddir=None):
+    def build(self, name, builddir=None):
         start = time.time()
         if builddir is None:
             if 'BUILDDIR' not in os.environ:
                 os.environ['BUILDDIR'] = os.getcwd()
                 
             builddir = os.environ['BUILDDIR']
-            
+
         self.builddir = builddir
+        self.name = name
         
+        print('PYMAKE: {}: Building {} in {} ...'.format(time.strftime("%H:%M:%S", time.localtime(start)), self.name, self.builddir))
+
         self.srcres = self.build_srcs()
          
-        self.res = self.load()
+        self.srchash, self.res = self.load()
         
         self.targets = self.set_targets()
         
@@ -62,11 +87,14 @@ class Build:
         else:
             self.rebuilt = False
         
+        self.dump()
+
+        print('PYMAKE: {}: {} done in {:.2f}s.'.format(time.strftime("%H:%M:%S", time.localtime(time.time())), self.name, time.time() - start))        
         return self.res
 
     def build_src_def(self, name, src):
         if hasattr(src, 'build'):
-            res = src.build()
+            res = src.build('.'.join([self.name, name]))
         else:
             res = src
         
@@ -96,21 +124,29 @@ class Build:
         if hasattr(self, "build_src_" + str(name)):
             res = getattr(self, "build_src_" + str(name))(src)
         else:
-            if name in self.srcs_setup:
-                if self.srcs_setup[name].collection == 'list':
-                    res = []
-                    for key in range(len(src)):
-                        res.append(self.build_src_collection(name, src, key))
-                elif self.srcs_setup[name].collection == 'dict':
-                    res = {}
-                    for key in src:
-                        res[key] = self.build_src_collection(name, src, key)
+            if self.srcs_setup[name].collection == 'list':
+                res = []
+                for key in range(len(src)):
+                    res.append(self.build_src_collection(name, src, key))
+            elif self.srcs_setup[name].collection == 'dict':
+                res = OrderedDict()
+                for key in sorted(src):
+                    res[key] = self.build_src_collection(name, src, key)
             else:
                 res = self.build_src_def(str(name), src)
         
 #         os.environ['BUILDDIR'] = self.builddir
         
         return res
+
+    def get_hash(self, obj):
+        return zlib.crc32(pickle.dumps(obj))
+
+    def calc_src_cash(self):
+        return zlib.crc32(pickle.dumps(self.srcres.items()))
+    
+    def get_pickle(self):
+        return File('$BUILDDIR/{}.pickle'.format(self.name))
 
     def setup_builddir_for_src(self, name):
         if name in self.srcs_setup:
@@ -120,7 +156,7 @@ class Build:
         os.environ['BUILDDIR'] = os.path.join(os.environ['BUILDDIR'], childdir.format(name=name))
 
     def build_srcs(self):
-        srcres = {}
+        srcres = OrderedDict()
         if self.srcs:
             for name, src in self.srcs.items():
                 srcres[name] = self.build_src(name, src)
@@ -182,6 +218,9 @@ class Build:
                 return True
 
     def outdated(self):
+        if self.get_hash(self.srcres) != self.srchash:
+            return True
+        
         if self.res:
             timestamp = self.timestamp
             

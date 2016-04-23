@@ -1,11 +1,12 @@
 from pymake.build import Build, SrcConf
 import fnmatch
 import os
-from pymake.utils import resolve_path
+from pymake.utils import resolve_path, Fileset, File
 import zlib
 import json
 import pickle
 import collections
+from collections import OrderedDict
 
 def str_check_filt(path, filter_in=[], filter_out=[]):
     for filt in filter_out:
@@ -40,13 +41,13 @@ def verbatim_path_part(path):
         else:
             return verbatim
 
-def get_all_files(root, file_filt_in=[], file_filt_out=[]):
-    folders = []
+def get_all_files(root, file_filt_in=[], file_filt_out=[], maxdepth=20):
+    folders = set()
     relative_paths = False
     for f in file_filt_in:
         verbatim_path = verbatim_path_part(f)
         if verbatim_path:
-            folders += [verbatim_path]
+            folders.add(verbatim_path)
         else:
             relative_paths = True
             
@@ -68,111 +69,58 @@ def filt_entry_resolve(entry):
         
     return entry
 
-from json import JSONEncoder
-
-def _default(self, obj):
-    return repr(obj)
-
-JSONEncoder.default = _default  # Replace with the above.
-
-class File:
-    def __init__(self, name):
-        self.name = resolve_path(name) 
-    
-    @property
-    def timestamp(self):
-        return os.path.getmtime(self.name)
-    
-    @property
-    def exists(self):
-        return os.path.exists(self.name)
+class FileBuild(Build):
+    srcs_setup = OrderedDict([
+                          ('fn', SrcConf())
+                          ])
+    def __init__(self, fn):
+        super().__init__(fn=fn)
     
     def load(self):
-        with open(self.name, 'rb') as f:
-            return pickle.load(f)
+        return None, None
     
-    def dump(self, obj):
-        with open(self.name, 'wb') as f:
-            return pickle.dump(obj, f)
+    def dump(self):
+        pass
     
-    def json_load(self):
-        with open(self.name) as f:    
-            return json.load(f)
-        
-    def json_dump(self, obj):
-        with open(self.name, 'w') as f:    
-            json.dump(obj, f)
-            
-    def default(self):
-        return str(self)
+    def outdated(self):
+        return True
     
-    def clean(self):
-        if self.exists:
-            os.remove(self.name)
-    
-    def __eq__(self, other):
-        return str(self) == str(other)
-    
-    def __str__(self):
-        return self.name
-    
-    __repr__ = __str__
-    
-    def __hash__(self):
-        return hash(self.name)
-
-class Fileset(list):
-    def __init__(self, files):
-        super().__init__([File(f) for f in files])
-        
-    def __eq__(self, other):
-        if len(self) != len(other):
-            return False
-        
-        return set(self) == set(other)
-    
-    def __ne__(self, other):
-        return not (self == other)
+    def rebuild(self):
+        return File(resolve_path(self.srcres['fn']))
 
 class FilesetBuild(Build):
     
-    srcs_setup = {'files': SrcConf('list'),
-                  'match': SrcConf('list'),
-                  'ignore': SrcConf('list')
-                  }
+    srcs_setup = OrderedDict([
+                          ('files', SrcConf('list')), 
+                          ('match', SrcConf('list')),
+                          ('ignore', SrcConf('list')),
+                          ('root', SrcConf()),
+                          ('maxdepth', SrcConf())
+                          ])
     
-    def __init__(self, files=[], match=[], ignore=[], root='.'):
-        super().__init__(files=files, match=match, ignore=ignore, root=root)
+    def __init__(self, files=[], match=[], ignore=[], root='.', maxdepth=10):
+        super().__init__(files=files, match=match, ignore=ignore, root=root, maxdepth=maxdepth)
     
-    def load(self):
-        res = None
-#         name = 0xffffffff
-
-#         name = zlib.crc32(pickle.dumps(self.srcres))
-        name = zlib.crc32(pickle.dumps(collections.OrderedDict(sorted(self.srcres.items()))))
-
-#         for src_name in ['files', 'match', 'ignore']:
-#             for f in self.srcs[src_name]:
-#                 name = zlib.crc32(str(f).encode(), name)
-
-        self.res_file = File('$BUILDDIR/fileset_{}.pickle'.format(hex(name)[2:]))
-        
-        if self.res_file.exists:
-#             try
-            res = self.res_file.load()
-#             except:
-#                 pass
-            
-        return res
+#     def load(self):
+#         res = None
+#         self.res_file = File('$BUILDDIR/fileset_{}.pickle'.format(hex(self.calc_src_cash())[2:]))
+#         
+#         if self.res_file.exists:
+# #             try
+#             res = self.res_file.load()
+# #             except:
+# #                 pass
+#             
+#         return res
     
     def set_targets(self):
         return [self.res_file]
-#         targets = []
-#         self.targets = [self.res_file]
-        
-#         return res 
     
     def outdated(self):
+        
+        curdir = os.getcwd();
+        
+        os.chdir(str(self.srcres['root']))
         
         match = [filt_entry_resolve(m)
                     for m in self.srcs['match']]
@@ -180,20 +128,20 @@ class FilesetBuild(Build):
                     for i in self.srcs['ignore']]
         
         res = []
-        if isinstance(self.srcs['files'], str):
-            if str_check_filt(self.srcs['files'], match, ignore):
-                res.append(resolve_path(self.srcs['files']))
+        if isinstance(self.srcres['files'], str):
+            if str_check_filt(self.srcres['files'], match, ignore):
+                res.append(resolve_path(self.srcres['files']))
         else:
-            for f in self.srcs['files']:
+            for f in self.srcres['files']:
                 if str_check_filt(f, match, ignore):
                     res.append(resolve_path(f))
         
         if match:
-            for f in get_all_files(resolve_path(self.srcs['root']), match, ignore):
+            for f in get_all_files(resolve_path(str(self.srcres['root'])), match, ignore, self.srcres['maxdepth']):
                 res.append(f)
             
-        self.newres = Fileset(res)
-        
+        self.newres = Fileset(res, self.res_file.timestamp)
+        os.chdir(curdir)
         if self.res is None:
             return True
         elif super().outdated():
@@ -204,6 +152,6 @@ class FilesetBuild(Build):
             return False
     
     def rebuild(self):
-        self.res_file.dump(self.newres)
+#        self.res_file.dump(self.newres)
         return self.newres
         

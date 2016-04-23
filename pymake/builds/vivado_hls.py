@@ -1,8 +1,8 @@
 from pymake.build import Build, SrcConf
 from pymake.builds.interact import InteractInst, Interact
 import os
-from collections import namedtuple
-from pymake.builds.fileset import File
+from collections import namedtuple, OrderedDict
+from pymake.utils import File, Filedict
 import zlib
 import collections
 import pickle
@@ -35,6 +35,7 @@ class VivadoHlsInteractInst(InteractInst):
                 err = 1            
         
         self.resp = lines
+        print('\n'.join(lines))
         return err
 
 class VivadoHlsInteract(Build):
@@ -47,9 +48,12 @@ class VivadoHlsInteract(Build):
 Solution = namedtuple('Solution', ['name', 'config'])
 
 class VivadoHlsSolution(Build):
-    srcs_setup = {'config': SrcConf('dict'),
-                  }
-        
+    srcs_setup = OrderedDict([
+                              ('name',      SrcConf()),
+                              ('part',      SrcConf()),
+                              ('clock',     SrcConf()),
+                              ('config',    SrcConf('dict'))
+                              ])
     def __init__(self, name='solution1', part='xc7k325tffg900-2', clock='-period 10 -name default', config={}):
         super().__init__(name=name, part=part, clock=clock, config=config)
 
@@ -64,23 +68,67 @@ class VivadoHlsSolution(Build):
                       collections.OrderedDict(sorted(conf.items())))
 
 class VivadoHlsProject:
-    def __init__(self, prj, basedir):
+    
+    def __init__(self, prj, basedir, sources, tb_sources, solutions, config):
         self.prj = prj
         self.basedir = basedir
-        self.p = VivadoHlsInteractInst()
+        self.config = config
+        self.sources = sources
+        self.tb_sources = tb_sources
+        self.p = None
         self.prj_dir = File(os.path.join(basedir, prj))
-        self.prj_file = File(os.path.join(basedir, prj, 'vivado_hls.app'))
+        self.files = Filedict([('prj_file', os.path.join(basedir, prj, 'vivado_hls.app')),
+                               ])
+# 
+        self.solutions = solutions
+        for s in solutions:
+            self.files[s.name + '_cfg'] = os.path.join(basedir, prj, s.name, s.name + '.aps')
+            self.files[s.name + '_directive'] = os.path.join(basedir, prj, s.name, s.name + '.directive')
+            
         self._solution = None
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove the unpicklable entries.
+        del state['p']
+        return OrderedDict(sorted(state.items()))
+    
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.p = None
     
     @property
     def exists(self):
-        return self.prj_file.exists
+        return self.files['prj_file'].exists
+    
+    def clean(self):
+        self.prj_dir.clean()
     
     def open(self):
+        self.p = VivadoHlsInteractInst()
         self.p.close()
         self.p.open()
         ret = self.p.cmd('cd {}'.format(self.basedir))
         ret = self.p.cmd('open_project {}'.format(self.prj))
+        
+    def configure(self):
+        self.clean()
+        self.open()
+        for f in self.sources:
+            self.add_file(f)
+            
+        for f in self.tb_sources:
+            self.add_file(f, tb=True)
+        
+        for k,v in self.config.items():
+            self.conf(k,v)
+            
+        for s in self.solutions:
+            self.solution = s.name
+            for k,v in s.config.items():
+                self.conf(k,v)
+                
+        self.close()
     
     def add_file(self, fn, tb=False):
         ret = self.p.cmd('add_files {} {}'.format('-tb' if tb else '', fn))
@@ -98,7 +146,7 @@ class VivadoHlsProject:
         if solution:
             self.solution = solution
             
-        return self.p.cmd('csynth_design', timeout=-1)
+        return self.p.cmd('csynth_design', timeout=120)
     
     def conf(self, name, value):
         if name == 'clock':
@@ -114,85 +162,70 @@ class VivadoHlsProject:
         self.p.cmd(cmd.format(value), resp=False)
     
     def close(self):
-        self.p.close()
+        if self.p:
+            self.p.close()
         
     def __del__(self):
-        self.close()
+#         self.close()
+        pass
         
 
 class VivadoHlsProjectBuild(Build):
-    srcs_setup = {'solutions': SrcConf('list'),
-                  'config' : SrcConf('dict')
-                  }
+    srcs_setup = OrderedDict([
+                              ('prj',       SrcConf()),
+                              ('fileset',   SrcConf()),
+                              ('tb_fileset', SrcConf()),
+                              ('solutions', SrcConf('list')), 
+                              ('config',    SrcConf('dict'))
+                              ])
     
     def __init__(self, prj, fileset, config={}, solutions=[VivadoHlsSolution()], tb_fileset = None):
         super().__init__(prj=prj, fileset=fileset, tb_fileset=tb_fileset, config=config, solutions=solutions)
 
-    def load(self):
-        
-        res = None
-        name = zlib.crc32(pickle.dumps(collections.OrderedDict(sorted(self.srcres.items()))))
-#         name = 0xffffffff
-# 
-#         name = zlib.crc32(str(self.srcs['prj']).encode(), name)
-#         for src_name in ['fileset', 'tb_fileset']:
-#             for f in self.srcs[src_name]:
-#                 name = zlib.crc32(str(f).encode(), name)
-#                 
-#         for key in sorted(self.srcs['config']):
-#             name = zlib.crc32(str(key + self.srcs['config'][key]).encode(), name)
-#             
-#         for s in self.srcs['solutions']:
-#             name = zlib.crc32(str(s.name).encode(), name)
-#             for key in sorted(s.config):
-#                 name = zlib.crc32(str(key + s.config[key]).encode(), name)
-
-        self.res_file = File('$BUILDDIR/vivado_hls_prj_{}.json'.format(hex(name)[2:]))
-        
-        folder = os.path.dirname(self.srcres['prj'])
-        prj_name = os.path.basename(self.srcres['prj'])
-        res = VivadoHlsProject(prj_name, folder)
-        
-        return res
+#     def load(self):
+#         res = None
+#         self.res_file = File('$BUILDDIR/vivado_hls_prj_{}.pickle'.format(hex(self.calc_src_cash())[2:]))
+#         res = VivadoHlsProject(self.srcres['prj'].basename, self.srcres['prj'].dirname)
+#         
+#         return res
     
     def set_targets(self):
-        pass
+        return [self.res_file]
 
     def outdated(self):
-        if self.res is None:
-            return True
-        elif super().outdated():
-            return True
-        elif res != self.res:
+        if (self.res is None) or (not self.res.exists) or (super().outdated()) or (not self.res_file.exists):
             return True
         else:
+            
             return False
 
     def rebuild(self):
-        prj.open()
-
-        for f in self.srcres['fileset']:
-            prj.add_file(f)
-            
-        for f in self.srcres['tb_fileset']:
-            prj.add_file(f, tb=True)
-        
-        for k,v in self.srcres['config'].items():
-            prj.conf(k,v)
-            
-        for s in self.srcres['solutions']:
-            prj.solution = s.name
-            for k,v in s.config.items():
-                prj.conf(k,v)
-        
-        return prj
+        res = VivadoHlsProject(self.srcres['prj'].basename, 
+                               self.srcres['prj'].dirname,
+                               self.srcres['fileset'], 
+                               self.srcres['tb_fileset'], 
+                               self.srcres['solutions'], 
+                               self.srcres['config']
+                               )
+        res.clean()
+        res.configure()
+#         open(str(self.res_file), 'w')
+        return res
                 
 class VivadoHlsSynthBuild(Build):
-    def __init__(self, hlsprj):
-        super().__init__(hlsprj=hlsprj)
+    srcs_setup = OrderedDict([
+                              ('hlsprj', SrcConf()),
+                              ('solution', SrcConf())
+                              ])
+    
+    def __init__(self, hlsprj, solution='solution1'):
+        super().__init__(hlsprj=hlsprj, solution=solution)
         
     def outdated(self):
         return self.res is None
     
     def rebuild(self):
-        self.srcres['hlsprj'].synth()
+        prj = self.srcres['hlsprj']
+        prj.open()
+        prj.solution = self.srcres['solution']
+        prj.synth()
