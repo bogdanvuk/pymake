@@ -52,7 +52,7 @@ def get_all_files(root, file_filt_in=[], file_filt_out=[], maxdepth=20):
             relative_paths = True
             
     if relative_paths:
-        folders += [root]
+        folders.add(root)
     
     for folder in folders:
         for r,d,f in os.walk(folder):

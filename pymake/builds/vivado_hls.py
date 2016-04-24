@@ -6,6 +6,7 @@ from pymake.utils import File, Filedict
 import zlib
 import collections
 import pickle
+from pymake.builds.fileset import FilesetBuild
 
 class VivadoHlsInteractInst(InteractInst):
     def __init__(self):
@@ -57,8 +58,8 @@ class VivadoHlsSolution(Build):
     def __init__(self, name='solution1', part='xc7k325tffg900-2', clock='-period 10 -name default', config={}):
         super().__init__(name=name, part=part, clock=clock, config=config)
 
-    def outdated(self):
-        return self.res is None
+#     def outdated(self):
+#         return self.res is None
             
     def rebuild(self):
         conf = {'part': self.srcres['part'], 'clock': self.srcres['clock']}
@@ -69,11 +70,12 @@ class VivadoHlsSolution(Build):
 
 class VivadoHlsProject:
     
-    def __init__(self, prj, basedir, sources, tb_sources, solutions, config):
+    def __init__(self, prj, basedir, sources, include, tb_sources, solutions, config):
         self.prj = prj
         self.basedir = basedir
         self.config = config
         self.sources = sources
+        self.include = include
         self.tb_sources = tb_sources
         self.p = None
         self.prj_dir = File(os.path.join(basedir, prj))
@@ -114,11 +116,16 @@ class VivadoHlsProject:
     def configure(self):
         self.clean()
         self.open()
+        
+        cflags = ''
+        if self.include:
+            cflags = ' '.join(['-I {}'.format(i) for i in self.include])
+        
         for f in self.sources:
-            self.add_file(f)
+            self.add_file(f, cflags=cflags)
             
         for f in self.tb_sources:
-            self.add_file(f, tb=True)
+            self.add_file(f, tb=True, cflags=cflags)
         
         for k,v in self.config.items():
             self.conf(k,v)
@@ -130,8 +137,10 @@ class VivadoHlsProject:
                 
         self.close()
     
-    def add_file(self, fn, tb=False):
-        ret = self.p.cmd('add_files {} {}'.format('-tb' if tb else '', fn))
+    def add_file(self, fn, tb=False, cflags=''):
+        if cflags:
+            cflags = ' -cflags "{}"'.format(cflags)
+        ret = self.p.cmd('add_files {}{} {}'.format('-tb' if tb else '', cflags, fn))
     
     @property
     def solution(self):
@@ -173,14 +182,15 @@ class VivadoHlsProject:
 class VivadoHlsProjectBuild(Build):
     srcs_setup = OrderedDict([
                               ('prj',       SrcConf()),
+                              ('include',   SrcConf()),
                               ('fileset',   SrcConf()),
                               ('tb_fileset', SrcConf()),
                               ('solutions', SrcConf('list')), 
                               ('config',    SrcConf('dict'))
                               ])
     
-    def __init__(self, prj, fileset, config={}, solutions=[VivadoHlsSolution()], tb_fileset = None):
-        super().__init__(prj=prj, fileset=fileset, tb_fileset=tb_fileset, config=config, solutions=solutions)
+    def __init__(self, prj, fileset, include=None, config={}, solutions=[VivadoHlsSolution()], tb_fileset = None):
+        super().__init__(prj=prj, fileset=fileset, include=include, tb_fileset=tb_fileset, config=config, solutions=solutions)
 
 #     def load(self):
 #         res = None
@@ -200,32 +210,50 @@ class VivadoHlsProjectBuild(Build):
             return False
 
     def rebuild(self):
-        res = VivadoHlsProject(self.srcres['prj'].basename, 
-                               self.srcres['prj'].dirname,
-                               self.srcres['fileset'], 
-                               self.srcres['tb_fileset'], 
-                               self.srcres['solutions'], 
-                               self.srcres['config']
+        res = VivadoHlsProject(prj          = self.srcres['prj'].basename, 
+                               basedir      = self.srcres['prj'].dirname,
+                               include      = self.srcres['include'],
+                               sources      = self.srcres['fileset'], 
+                               tb_sources   = self.srcres['tb_fileset'], 
+                               solutions    = self.srcres['solutions'], 
+                               config       = self.srcres['config']
                                )
         res.clean()
         res.configure()
 #         open(str(self.res_file), 'w')
         return res
                 
-class VivadoHlsSynthBuild(Build):
+class VivadoHlsVhdlSynthBuild(Build):
     srcs_setup = OrderedDict([
                               ('hlsprj', SrcConf()),
+                              ('synths', SrcConf()),
                               ('solution', SrcConf())
                               ])
     
-    def __init__(self, hlsprj, solution='solution1'):
-        super().__init__(hlsprj=hlsprj, solution=solution)
-        
+    def __init__(self, hlsprj, synths=FilesetBuild(match=['./solution1/syn/vhdl/*.vhd']), solution='solution1'):
+        super().__init__(hlsprj=hlsprj, synths=synths, solution=solution)
+    
+    def build_src_synths(self, synths):
+        synths.srcs['root'] = self.srcres['hlsprj'].prj_dir
+        return super().build_src_def('synths', synths)
+    
+#     def set_targets(self):
+#         return [self.srcres['vhdl']]
+    
     def outdated(self):
-        return self.res is None
+        if not self.srcres['synths']:
+            return True
+        elif self.srcres['synths'].timestamp[0] < self.srcres['hlsprj'].sources.timestamp[1]:
+            return True
+        else:
+            return False
+#        return self.res is None
     
     def rebuild(self):
         prj = self.srcres['hlsprj']
         prj.open()
         prj.solution = self.srcres['solution']
         prj.synth()
+        prj.vhdl = self.build_src_synths(self.srcs['synths'])
+        
+        return prj

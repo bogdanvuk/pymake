@@ -79,6 +79,17 @@ class Fileset(list):
         super().__init__([File(f) for f in files])
         self.list_timestamp = list_timestamp
 
+    @property
+    def timestamp(self):
+        tsm = [float('+inf'), float('-inf')]
+        for f in self:
+            t = f.timestamp
+           
+            if t < tsm[0]: tsm[0] = t
+            if t > tsm[1]: tsm[1] = t
+            
+        return tuple(tsm)
+
     def __eq__(self, other):
         if len(self) != len(other):
             return False

@@ -3,7 +3,7 @@ import os
 from collections import OrderedDict
 import pickle
 import zlib
-from pymake.utils import File
+from pymake.utils import File, resolve_path
 
 class SrcConf:
     def __init__(self, collection=None, childdir=''):
@@ -62,20 +62,29 @@ class Build:
     def set_targets(self):
         pass
 
-    def build(self, name, builddir=None):
-        start = time.time()
-        if builddir is None:
-            if 'BUILDDIR' not in os.environ:
-                os.environ['BUILDDIR'] = os.getcwd()
+    def set_environ_var(self, name, val, default):
+        if val is None:
+            if name not in os.environ:
+                os.environ[name] = default
                 
-            builddir = os.environ['BUILDDIR']
+            val = os.environ[name]
+        else:
+            os.environ[name] = val
+            
+        return val
 
-        self.builddir = builddir
+    def build(self, name, builddir=None, srcdir=None):
+        start = time.time()
+
+        self.builddir = self.set_environ_var('BUILDDIR', builddir, os.getcwd())
+        os.makedirs(resolve_path(self.builddir), exist_ok=True)
+        self.srcdir = self.set_environ_var('SRCDIR', srcdir, os.getcwd())
+        
         self.name = name
         
         print('PYMAKE: {}: Building {} in {} ...'.format(time.strftime("%H:%M:%S", time.localtime(start)), self.name, self.builddir))
 
-        self.srcres = self.build_srcs()
+        self.build_srcs()
          
         self.srchash, self.res = self.load()
         
@@ -84,33 +93,37 @@ class Build:
         if self.outdated():
             self.rebuilt = True
             self.res = self.rebuild()
+            self.dump()
         else:
             self.rebuilt = False
-        
-        self.dump()
 
         print('PYMAKE: {}: {} done in {:.2f}s.'.format(time.strftime("%H:%M:%S", time.localtime(time.time())), self.name, time.time() - start))        
         return self.res
 
-    def build_src_def(self, name, src):
+    def build_src_def(self, name, src, builddir='$BUILDDIR', srcdir='$SRCDIR'):
+        os.environ['BUILDDIR'] = resolve_path(builddir)
+        os.environ['SRCDIR'] = resolve_path(srcdir)
         if hasattr(src, 'build'):
             res = src.build('.'.join([self.name, name]))
         else:
             res = src
         
+        os.environ['BUILDDIR'] = self.builddir
+        os.environ['SRCDIR'] = self.srcdir
+        
         return res
 
-    def build_src_collection(self, name, src, key):
+    def src_build_collection(self, name, src, key):
         setup_fname = "setup_src_{0}_item".format(str(name))
         build_fname = "build_src_{0}_item".format(str(name))
         
         if hasattr(self, setup_fname):
-            src[key] = getattr(self, setup_fname)(src, key) 
+            res = getattr(self, setup_fname)(src, key) 
             
         if hasattr(self, build_fname):
             res = getattr(self, build_fname)(src, key)
         else:
-            res = self.build_src_def(str(name), src[key])
+            res = self.build_src_def('_'.join([str(name), str(key)]), src[key])
                 
         return res
 
@@ -127,16 +140,15 @@ class Build:
             if self.srcs_setup[name].collection == 'list':
                 res = []
                 for key in range(len(src)):
-                    res.append(self.build_src_collection(name, src, key))
+                    res.append(self.src_build_collection(name, src, key))
             elif self.srcs_setup[name].collection == 'dict':
                 res = OrderedDict()
                 for key in sorted(src):
-                    res[key] = self.build_src_collection(name, src, key)
+                    res[key] = self.src_build_collection(name, src, key)
             else:
                 res = self.build_src_def(str(name), src)
         
 #         os.environ['BUILDDIR'] = self.builddir
-        
         return res
 
     def get_hash(self, obj):
@@ -156,13 +168,11 @@ class Build:
         os.environ['BUILDDIR'] = os.path.join(os.environ['BUILDDIR'], childdir.format(name=name))
 
     def build_srcs(self):
-        srcres = OrderedDict()
+        self.srcres = OrderedDict()
         if self.srcs:
             for name, src in self.srcs.items():
-                srcres[name] = self.build_src(name, src)
+                self.srcres[name] = self.build_src(name, src)
                 
-        return srcres
-
     @property
     def timestamp(self):
         oldest_t_time = None
@@ -221,30 +231,32 @@ class Build:
         if self.get_hash(self.srcres) != self.srchash:
             return True
         
-        if self.res:
-            timestamp = self.timestamp
-            
-            try:
-                oldest_t = timestamp[0]
-            except TypeError:
-                oldest_t = timestamp
-            
-            if oldest_t == float("-inf"):
-                return True
-            
-            for name, res in self.srcres.items():
-                if name in self.srcs_setup:
-                    if self.srcs_setup[name].collection == 'list':
-                        for key in range(len(res)):
-                            if self.is_src_outdated(name, oldest_t, key):
-                                return True
-                    elif self.srcs_setup[name].collection == 'dict':
-                        for key in res:
-                            if self.is_src_outdated(name, oldest_t, key):
-                                return True
-                else:
-                    if self.is_src_outdated(name, oldest_t):
-                        return True
+#         if self.res:
+#             timestamp = self.timestamp
+#             
+#             try:
+#                 oldest_t = timestamp[0]
+#             except TypeError:
+#                 oldest_t = timestamp
+#             
+#             if oldest_t == float("-inf"):
+#                 return True
+#             
+#             for name, res in self.srcres.items():
+#                 if name in self.srcs_setup:
+#                     if self.srcs_setup[name].collection == 'list':
+#                         for key in range(len(res)):
+#                             if self.is_src_outdated(name, oldest_t, key):
+#                                 return True
+#                     elif self.srcs_setup[name].collection == 'dict':
+#                         for key in res:
+#                             if self.is_src_outdated(name, oldest_t, key):
+#                                 return True
+#                 else:
+#                     if self.is_src_outdated(name, oldest_t):
+#                         return True
 
         return False
 
+    def rebuild(self):
+        return self.srcres
