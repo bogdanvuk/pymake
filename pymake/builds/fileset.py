@@ -7,6 +7,7 @@ import json
 import pickle
 import collections
 from collections import OrderedDict
+import shutil
 
 def str_check_filt(path, filter_in=[], filter_out=[]):
     for filt in filter_out:
@@ -154,4 +155,32 @@ class FilesetBuild(Build):
     def rebuild(self):
 #        self.res_file.dump(self.newres)
         return self.newres
+
+class FileCopyBuild(Build):
+    srcs_setup = OrderedDict([
+                          ('args', SrcConf('list:tuple')), 
+                          ])
+    
+    def outdated(self):
+        self.target_filesets = []
+        for tdir, s in self.srcres['args']:
+            target_fileset = Fileset([os.path.join(str(tdir), f.basename) for f in s])
+            
+            self.target_filesets.append(target_fileset)
+        
+        for (tdir, s), tf in zip(self.srcres['args'], self.target_filesets):
+            if tf.timestamp[1] < s.timestamp[0]:
+                return True
+            
+            
+             
+            pass
+    
+    def rebuild(self):
+        for (tdir, s), tf in zip(self.srcres['args'], self.target_filesets):
+            os.makedirs(str(tdir), exist_ok=True)
+            for (tf, sf) in zip(tf, s):
+                if tf.timestamp < sf.timestamp:
+                    shutil.copy(str(sf), str(tf))
+        pass
         

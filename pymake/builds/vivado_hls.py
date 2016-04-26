@@ -233,9 +233,9 @@ class VivadoHlsVhdlSynthBuild(Build):
     def __init__(self, hlsprj, synths=FilesetBuild(match=['./solution1/syn/vhdl/*.vhd']), solution='solution1'):
         super().__init__(hlsprj=hlsprj, synths=synths, solution=solution)
     
-    def build_src_synths(self, synths):
+    def build_src_synths(self, name, synths, collection=''):
         synths.srcs['root'] = self.srcres['hlsprj'].prj_dir
-        return super().build_src_def('synths', synths)
+        return super().build_src('synths', synths)
     
 #     def set_targets(self):
 #         return [self.srcres['vhdl']]
@@ -254,6 +254,6 @@ class VivadoHlsVhdlSynthBuild(Build):
         prj.open()
         prj.solution = self.srcres['solution']
         prj.synth()
-        prj.vhdl = self.build_src_synths(self.srcs['synths'])
+#         prj.vhdl = self.build_src_synths(self.srcs['synths'])
         
-        return prj
+        return self.build_src_synths('synths', self.srcs['synths'])

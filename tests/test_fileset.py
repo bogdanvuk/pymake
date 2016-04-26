@@ -5,6 +5,7 @@ from pymake.utils import resolve_path
 from pymake.builds.interact import Interact
 from pymake.builds.vivado_hls import VivadoHlsInteract
 import os
+import re
 
 
 def check_fileset(fs, match):
@@ -54,5 +55,5 @@ def test_interact():
     vivado_hls_files = [resolve_path(f) for f in vivado_hls_files_rel]
     assert set(vivado_hls_files) == set(find_files) 
     
-test_fileset2()
+# test_fileset2()
 # test_interact()

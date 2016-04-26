@@ -4,20 +4,40 @@ from collections import OrderedDict
 import pickle
 import zlib
 from pymake.utils import File, resolve_path
+import re
 
 class SrcConf:
-    def __init__(self, collection=None, childdir=''):
+    def __init__(self, collection='', childdir='', postproc=None):
         self.collection = collection
         self.childdir = childdir
+        self.postproc = postproc
 
 class Build:
     
     srcs_setup = OrderedDict()
     
     def __init__(self, *args, **kwargs):
+        # Napravi da mogu da se kopiraju pickle fajlovi iz buildova istih klasa, ako su ulazni parametri isti. 
+        
+        srcs = kwargs.copy()
+        
         self.srcs = OrderedDict()
         for s in self.srcs_setup:
-            self.srcs[s] = kwargs[s]
+            if s not in ['args', 'kwargs']:
+                self.srcs[s] = srcs[s]
+                del srcs[s]
+        
+        self.srcs_setup = self.srcs_setup.copy()
+        
+        if srcs:
+            self.srcs['kwargs'] = srcs
+            if 'kwargs' not in self.srcs_setup:
+                self.srcs_setup['kwargs'] = SrcConf('dict')
+                
+        if args:
+            self.srcs['args'] = args
+            if 'args' not in self.srcs_setup:
+                self.srcs_setup['args'] = SrcConf('list')
 
         self.res = None
         self.srcres = None
@@ -100,11 +120,13 @@ class Build:
         print('PYMAKE: {}: {} done in {:.2f}s.'.format(time.strftime("%H:%M:%S", time.localtime(time.time())), self.name, time.time() - start))        
         return self.res
 
-    def build_src_def(self, name, src, builddir='$BUILDDIR', srcdir='$SRCDIR'):
+    def src_build_item(self, name, src, key=[], builddir='$BUILDDIR', srcdir='$SRCDIR'):
         os.environ['BUILDDIR'] = resolve_path(builddir)
         os.environ['SRCDIR'] = resolve_path(srcdir)
         if hasattr(src, 'build'):
-            res = src.build('.'.join([self.name, name]))
+            name = '.'.join([self.name, name])
+            name = '_'.join([name] + list(map(str, key)))
+            res = src.build(name)
         else:
             res = src
         
@@ -113,42 +135,26 @@ class Build:
         
         return res
 
-    def src_build_collection(self, name, src, key):
-        setup_fname = "setup_src_{0}_item".format(str(name))
-        build_fname = "build_src_{0}_item".format(str(name))
-        
-        if hasattr(self, setup_fname):
-            res = getattr(self, setup_fname)(src, key) 
-            
-        if hasattr(self, build_fname):
-            res = getattr(self, build_fname)(src, key)
+    def build_src(self, name, src, collection='', key=[]):
+        cur_collection, _, collection = collection.partition(':')
+        if cur_collection in ['list', 'tuple']:
+            res = []
+            for subkey in range(len(src)):
+                if self.name == 'hlsmac':
+                    pass
+                res.append(self.build_src(name, src[subkey], collection=collection, key=key + [subkey]))
+                if self.name == 'hlsmac':
+                    pass
+        elif cur_collection == 'dict':
+            res = OrderedDict()
+            for subkey in sorted(src):
+                res[subkey] = self.build_src(name, src[subkey], collection=collection, key=key + [subkey])
         else:
-            res = self.build_src_def('_'.join([str(name), str(key)]), src[key])
-                
-        return res
-
-    def build_src(self, name, src, key=None):
-
-#         self.setup_builddir_for_src(name)
-
-        if hasattr(self, "setup_src_" + str(name)):
-            src = getattr(self, "setup_src_" + str(name))(src)
-                        
-        if hasattr(self, "build_src_" + str(name)):
-            res = getattr(self, "build_src_" + str(name))(src)
-        else:
-            if self.srcs_setup[name].collection == 'list':
-                res = []
-                for key in range(len(src)):
-                    res.append(self.src_build_collection(name, src, key))
-            elif self.srcs_setup[name].collection == 'dict':
-                res = OrderedDict()
-                for key in sorted(src):
-                    res[key] = self.src_build_collection(name, src, key)
-            else:
-                res = self.build_src_def(str(name), src)
+            res = self.src_build_item(str(name), src, key=key)
         
-#         os.environ['BUILDDIR'] = self.builddir
+        if self.srcs_setup[name].postproc:
+            res = self.srcs_setup[name].postproc(name, res, key)
+        
         return res
 
     def get_hash(self, obj):
@@ -171,7 +177,10 @@ class Build:
         self.srcres = OrderedDict()
         if self.srcs:
             for name, src in self.srcs.items():
-                self.srcres[name] = self.build_src(name, src)
+                build_func = getattr(self, "build_src_" + str(name), self.build_src)
+                res = build_func(name, src, collection=self.srcs_setup[name].collection)
+                    
+                self.srcres[name] = res
                 
     @property
     def timestamp(self):
@@ -259,4 +268,10 @@ class Build:
         return False
 
     def rebuild(self):
+        if len(self.srcres) == 1:
+            if 'args' in self.srcres:
+                return self.srcres['args']
+            elif 'kwargs' in self.srcres:
+                return self.srcres['kwargs']
+            
         return self.srcres

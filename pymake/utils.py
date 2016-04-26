@@ -76,7 +76,7 @@ class Filedict(OrderedDict):
 
 class Fileset(list):
     def __init__(self, files = [], list_timestamp=float('-inf')):
-        super().__init__([File(f) for f in files])
+        super().__init__([File(str(f)) for f in files])
         self.list_timestamp = list_timestamp
 
     @property
