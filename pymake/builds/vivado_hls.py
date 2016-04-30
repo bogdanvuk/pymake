@@ -49,14 +49,16 @@ class VivadoHlsInteract(Build):
 Solution = namedtuple('Solution', ['name', 'config'])
 
 class VivadoHlsSolution(Build):
-    srcs_setup = OrderedDict([
-                              ('name',      SrcConf()),
-                              ('part',      SrcConf()),
-                              ('clock',     SrcConf()),
-                              ('config',    SrcConf('dict'))
-                              ])
-    def __init__(self, name='solution1', part='xc7k325tffg900-2', clock='-period 10 -name default', config={}):
-        super().__init__(name=name, part=part, clock=clock, config=config)
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
+                      ('name',      SrcConf()),
+                      ('part',      SrcConf()),
+                      ('clock',     SrcConf()),
+                      ('config',    SrcConf('dict'))
+                      ])
+    
+    def __init__(self, name='solution1', part='xc7k325tffg900-2', clock='-period 10 -name default', config={}, **kwargs):
+        super().__init__(name=name, part=part, clock=clock, config=config, **kwargs)
 
 #     def outdated(self):
 #         return self.res is None
@@ -70,12 +72,13 @@ class VivadoHlsSolution(Build):
 
 class VivadoHlsProject:
     
-    def __init__(self, prj, basedir, sources, include, tb_sources, solutions, config):
+    def __init__(self, prj, basedir, sources, include, cflags, tb_sources, solutions, config):
         self.prj = prj
         self.basedir = basedir
         self.config = config
         self.sources = sources
         self.include = include
+        self.cflags = cflags
         self.tb_sources = tb_sources
         self.p = None
         self.prj_dir = File(os.path.join(basedir, prj))
@@ -117,7 +120,7 @@ class VivadoHlsProject:
         self.clean()
         self.open()
         
-        cflags = ''
+        cflags = self.cflags
         if self.include:
             cflags = ' '.join(['-I {}'.format(i) for i in self.include])
         
@@ -180,17 +183,19 @@ class VivadoHlsProject:
         
 
 class VivadoHlsProjectBuild(Build):
-    srcs_setup = OrderedDict([
-                              ('prj',       SrcConf()),
-                              ('include',   SrcConf()),
-                              ('fileset',   SrcConf()),
-                              ('tb_fileset', SrcConf()),
-                              ('solutions', SrcConf('list')), 
-                              ('config',    SrcConf('dict'))
-                              ])
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
+                     ('prj',       SrcConf()),
+                     ('include',   SrcConf()),
+                     ('cflags',    SrcConf()),
+                     ('fileset',   SrcConf()),
+                     ('tb_fileset',SrcConf()),
+                     ('solutions', SrcConf('list')), 
+                     ('config',    SrcConf('dict'))
+                     ])
     
-    def __init__(self, prj, fileset, include=None, config={}, solutions=[VivadoHlsSolution()], tb_fileset = None):
-        super().__init__(prj=prj, fileset=fileset, include=include, tb_fileset=tb_fileset, config=config, solutions=solutions)
+    def __init__(self, prj, fileset, cflags='', include=None, config={}, solutions=[VivadoHlsSolution()], tb_fileset = [], **kwargs):
+        super().__init__(prj=prj, fileset=fileset, cflags=cflags, include=include, tb_fileset=tb_fileset, config=config, solutions=solutions, **kwargs)
 
 #     def load(self):
 #         res = None
@@ -213,6 +218,7 @@ class VivadoHlsProjectBuild(Build):
         res = VivadoHlsProject(prj          = self.srcres['prj'].basename, 
                                basedir      = self.srcres['prj'].dirname,
                                include      = self.srcres['include'],
+                               cflags       = self.srcres['cflags'],
                                sources      = self.srcres['fileset'], 
                                tb_sources   = self.srcres['tb_fileset'], 
                                solutions    = self.srcres['solutions'], 
@@ -224,18 +230,19 @@ class VivadoHlsProjectBuild(Build):
         return res
                 
 class VivadoHlsVhdlSynthBuild(Build):
-    srcs_setup = OrderedDict([
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
                               ('hlsprj', SrcConf()),
                               ('synths', SrcConf()),
                               ('solution', SrcConf())
                               ])
     
-    def __init__(self, hlsprj, synths=FilesetBuild(match=['./solution1/syn/vhdl/*.vhd']), solution='solution1'):
-        super().__init__(hlsprj=hlsprj, synths=synths, solution=solution)
+    def __init__(self, hlsprj, synths=FilesetBuild(match=['./solution1/syn/vhdl/*.vhd']), solution='solution1', **kwargs):
+        super().__init__(hlsprj=hlsprj, synths=synths, solution=solution, **kwargs)
     
-    def build_src_synths(self, name, synths, collection=''):
-        synths.srcs['root'] = self.srcres['hlsprj'].prj_dir
-        return super().build_src('synths', synths)
+    def build_src_synths(self, name, src, collection='', key = []):
+        src.srcs['root'] = self.srcres['hlsprj'].prj_dir
+        return super().def_build_src('synths', src, collection, key)
     
 #     def set_targets(self):
 #         return [self.srcres['vhdl']]

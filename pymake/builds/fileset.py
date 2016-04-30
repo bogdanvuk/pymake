@@ -71,11 +71,13 @@ def filt_entry_resolve(entry):
     return entry
 
 class FileBuild(Build):
-    srcs_setup = OrderedDict([
-                          ('fn', SrcConf())
-                          ])
-    def __init__(self, fn):
-        super().__init__(fn=fn)
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
+                         ('fn', SrcConf())
+                         ])
+    
+    def __init__(self, fn, **kwargs):
+        super().__init__(fn=fn, **kwargs)
     
     def load(self):
         return None, None
@@ -91,7 +93,8 @@ class FileBuild(Build):
 
 class FilesetBuild(Build):
     
-    srcs_setup = OrderedDict([
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
                           ('files', SrcConf('list')), 
                           ('match', SrcConf('list')),
                           ('ignore', SrcConf('list')),
@@ -99,8 +102,8 @@ class FilesetBuild(Build):
                           ('maxdepth', SrcConf())
                           ])
     
-    def __init__(self, files=[], match=[], ignore=[], root='.', maxdepth=10):
-        super().__init__(files=files, match=match, ignore=ignore, root=root, maxdepth=maxdepth)
+    def __init__(self, files=[], match=[], ignore=[], root='.', maxdepth=10, **kwargs):
+        super().__init__(files=files, match=match, ignore=ignore, root=root, maxdepth=maxdepth, **kwargs)
     
 #     def load(self):
 #         res = None

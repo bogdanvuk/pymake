@@ -34,6 +34,7 @@ class File:
             return pickle.load(f)
     
     def dump(self, obj):
+        os.makedirs(os.path.dirname(self.name), exist_ok=True)
         with open(self.name, 'wb') as f:
             return pickle.dump(obj, f)
     
