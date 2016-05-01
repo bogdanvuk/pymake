@@ -9,10 +9,17 @@ import pickle
 from pymake.builds.fileset import FilesetBuild
 
 class VivadoHlsInteractInst(InteractInst):
-    def __init__(self):
-        super().__init__(runcmd='vivado_hls -i', prompt='vivado_hls> ')
+    @classmethod
+    def open(cls):
+        return super(VivadoHlsInteractInst, cls).open(runcmd='vivado_hls -i', prompt='vivado_hls> ')
     
-    def cmd(self, text, resp=False, timeout=5):
+    def clean(self):
+        self.cmd('close_project')
+    
+    def send_quit(self):
+        self.p.sendeof()
+    
+    def cmd(self, text, timeout=5):
         super().cmd(text, timeout)
 
 #         resp_received = False
@@ -110,9 +117,9 @@ class VivadoHlsProject:
         self.prj_dir.clean()
     
     def open(self):
-        self.p = VivadoHlsInteractInst()
-        self.p.close()
-        self.p.open()
+        self.p = VivadoHlsInteractInst.open()
+#        self.p.close()
+#         self.p.open()
         ret = self.p.cmd('cd {}'.format(self.basedir))
         ret = self.p.cmd('open_project {}'.format(self.prj))
         
@@ -163,15 +170,12 @@ class VivadoHlsProject:
     def conf(self, name, value):
         if name == 'clock':
             cmd = 'create_clock {}'
-            resp = False
         elif (name in ['top', 'part', 'clock_uncertainty']) or (name.startswith('directive')):
             cmd = 'set_{}'.format(name) + ' {}'
-            resp = True
         else:
             cmd = 'config_{}'.format(name) + ' {}'
-            resp = True
             
-        self.p.cmd(cmd.format(value), resp=False)
+        self.p.cmd(cmd.format(value))
     
     def close(self):
         if self.p:

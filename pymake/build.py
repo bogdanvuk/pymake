@@ -185,12 +185,20 @@ class Build:
         else:
             self.rebuilt = False
 
-        print('PYMAKE: {}: {} done in {:.2f}s.'.format(time.strftime("%H:%M:%S", time.localtime(time.time())), os.environ['BUILDNAME'], time.time() - self.start_time))        
+        indent = '-'*os.environ['BUILDNAME'].count('.')
+        print('PYMAKE: {}: {} {} done in {:.2f}s.'.format(time.strftime("%H:%M:%S", time.localtime(time.time())), indent, os.environ['BUILDNAME'], time.time() - self.start_time))        
         return self.res
 
     def def_build_src_item(self, name, src, key=[]):
         if hasattr(src, 'build'):
             target = self.srcs_setup.get(name, SrcConf()).target
+            try:
+                while key and (not isinstance(target, str)):
+                    target = target[key[0]]
+                    key = key[1:]
+            except:
+                pass
+            
             if (target != 'all'):
                 pass
             name = '.'.join([os.environ['BUILDNAME'], name])
@@ -252,8 +260,9 @@ class Build:
 
         if 'PICKLEDIR' not in os.environ:
             os.environ['PICKLEDIR'] = os.path.join(os.environ['BUILDDIR'], '.pickle')
-            
-        print('PYMAKE: {}: Building {} in {} ...'.format(time.strftime("%H:%M:%S", time.localtime(self.start_time)), os.environ['BUILDNAME'], os.environ['BUILDDIR']))
+        
+        indent = '-'*os.environ['BUILDNAME'].count('.')
+        print('PYMAKE: {}: {} Building {} in {} ...'.format(time.strftime("%H:%M:%S", time.localtime(self.start_time)), indent, os.environ['BUILDNAME'], os.environ['BUILDDIR']))
         return res
         
     def reset_env(self):

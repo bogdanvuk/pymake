@@ -160,30 +160,25 @@ class FilesetBuild(Build):
         return self.newres
 
 class FileCopyBuild(Build):
-    srcs_setup = OrderedDict([
-                          ('args', SrcConf('list:tuple')), 
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
+                          ('src', SrcConf()),
+                          ('dest', SrcConf()), 
                           ])
     
+    def __init__(self, src, dest, **kwargs):
+        super().__init__(src=src, dest=dest, **kwargs)
+    
     def outdated(self):
-        self.target_filesets = []
-        for tdir, s in self.srcres['args']:
-            target_fileset = Fileset([os.path.join(str(tdir), f.basename) for f in s])
-            
-            self.target_filesets.append(target_fileset)
+        self.target_fileset = Fileset([os.path.join(str(self.srcres['dest']), f.basename) for f in self.srcres['src']])
         
-        for (tdir, s), tf in zip(self.srcres['args'], self.target_filesets):
-            if tf.timestamp[1] < s.timestamp[0]:
-                return True
-            
-            
-             
-            pass
+        if super().outdated() or (self.target_fileset.timestamp[1] < self.srcres['src'].timestamp[0]):
+            return True
     
     def rebuild(self):
-        for (tdir, s), tf in zip(self.srcres['args'], self.target_filesets):
-            os.makedirs(str(tdir), exist_ok=True)
-            for (tf, sf) in zip(tf, s):
-                if tf.timestamp < sf.timestamp:
-                    shutil.copy(str(sf), str(tf))
-        pass
+        os.makedirs(str(self.srcres['dest']), exist_ok=True)
+        for (tf, sf) in zip(self.target_fileset, self.srcres['src']):
+            if tf.timestamp < sf.timestamp:
+                shutil.copy(str(sf), str(tf))
+        return self.target_fileset 
         
