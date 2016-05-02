@@ -3,6 +3,8 @@ from pymake.utils import File, Filedict
 import os
 from collections import OrderedDict
 from pymake.build import Build, SrcConf
+from pymake.builds.fileset import FileBuild
+import string
 
 class VivError(Exception):
     pass
@@ -30,15 +32,15 @@ class VivadoInteractInst(InteractInst):
         print(resp)
         self.warnings = []
         ret = []
-        lines_raw = resp.split('\n')     
+        lines_raw = resp.strip().split('\n')     
         for line in lines_raw:
             if line.startswith('ERROR:') and except_err:
                 raise VivError(lines_raw)
             
-            if line.startswith('WARNING:'):
+            if strip_warn and line.startswith('WARNING:'):
                 self.warnings.append(line)
-                if not strip_warn:
-                    ret.append(line)
+            else:
+                ret.append(line)
                 
 #         return self.p.before.decode()
 #        print('\n'.join(ret))
@@ -57,16 +59,41 @@ class VivadoInteractInst(InteractInst):
         for ln in resp:
             if except_err and ln.startswith('ERROR:'):
                 raise VivError('\n'.join(resp))
-  
+
+class IpInst:
+    def __init__(self, name, vlnv, ipdir=None, config={}):
+        self.name = name
+        self.vlnv = vlnv
+        self.config = config
+        self.ipdir = ipdir
+        
+class IpInstBuild(Build):
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([
+                     ('name',      SrcConf()),
+                     ('vlnv',      SrcConf()),
+                     ('ipdir',     SrcConf()),
+                     ('config',    SrcConf('dict'))
+                     ])
+    def __init__(self, name, vlnv, ipdir=None, config={}, **kwargs):
+        super().__init__(name=name, vlnv=vlnv, ipdir=ipdir, config=config, **kwargs)
+        
+    def rebuild(self):
+        return IpInst(name        = self.srcres['name'], 
+                      vlnv        = self.srcres['vlnv'],
+                      ipdir       = self.srcres['ipdir'], 
+                      config      = self.srcres['config']
+                    )
     
 class VivadoProject:
     
-    def __init__(self, name, prjdir, sources = OrderedDict(), config = OrderedDict()):
+    def __init__(self, name, prjdir, sources = OrderedDict(), ips=[], config = OrderedDict()):
         self.name = name
         self.config = config
         self.sources = sources
         self.p = None
         self.prjdir = prjdir
+        self.ips = ips
         self.prjfile = File(os.path.join(str(self.prjdir), name + '.xpr'))
         self.files = Filedict([('prjfile', self.prjfile),
                                ])
@@ -136,7 +163,7 @@ class VivadoProject:
         try:
             self.p.cmd('open_project {}'.format(self.prjfile))
         except VivError:
-            self.p.cmd('create_project {} {}'.format(self.name, self.basedir))
+            self.p.cmd('create_project {} {}'.format(self.name, self.prjdir))
         pass
         
     def configure(self):
@@ -150,10 +177,77 @@ class VivadoProject:
             self.add_fileset(n,f)
             self.p.cmd('update_compile_order')
         
+        if self.ips:
+            self.add_all_ips()
 #         for f in self.sources:
 #             self.add_file(f)
                 
         self.close()
+    
+    def add_ip(self, ip):
+        ret = self.p.cmd('get_ips ' + ip.name)
+
+        rebuild = False
+
+        if ret.strip() == ip.name:
+            ip_dir = self.p.cmd('get_property IP_DIR [get_ips ' + ip.name + ']')[0]
+#             js_params = os.path.join(ip_dir, 'params.js')
+#         
+#             if os.path.isfile(js_params):
+#                 with open(js_params) as f:
+#                     params = json.load(f)
+#                 
+#                 if params != ip.prop:
+#                     rebuild = True
+#             else:
+#                 rebuild = True
+    
+#             if rebuild:
+# #                 self.p.cmd('remove_files', '[get_files ' + ip.module + '.xci]')
+#                 self.p.cmd('reset_target', 'all', '[get_ips ' + ip.module + ']')
+        else:
+            self.p.cmd('create_ip -vlnv {vlnv} -module_name {module_name}'.format(vlnv=ip.vlnv, 
+                                                                              module_name=ip.name))
+            
+#             ip_dir = self.p.cmd('get_property IP_DIR [get_ips ' + ip.module + ']')[0]
+#             js_params = os.path.join(ip_dir, 'params.js')
+            
+            rebuild = True
+
+        if rebuild:
+#             with open(js_params, 'w') as f:
+#                 json.dump(ip.prop, f) 
+            
+            if ip.config:
+                prop_list = ' '.join(['CONFIG.' + k + ' {' + v + '}' for k,v in ip.prop.items()])
+                self.p.cmd('set_property -dict [list ' + prop_list + '] [get_ips ' + ip.module + ']')
+            
+#         self.p.cmd('validate_ip', '-verbose', '-save_ip', '[get_ips ' + ip.module + ']')
+    
+    def add_all_ips(self):
+        ip_repo_paths = set()
+        for i in self.ips:
+            if i.ipdir:
+                ip_repo_paths.add(str(i.ipdir.dirname))
+        
+        if ip_repo_paths:
+            self.p.cmd('set_property ip_repo_paths {{{}}} [current_project]'.format(' '.join(ip_repo_paths)))
+            self.p.cmd('update_ip_catalog')
+        
+        for i in self.ips:
+            self.add_ip(i)
+            
+        prjips = self.p.cmd('get_ips', strip_warn=True).split('\n')[0]
+        removal = []
+        ipmodules = [ip.name for ip in self.ips]
+        for i in prjips:
+            if (i not in ipmodules):
+                removal.append(i + '.xci')
+        
+        if removal:
+            cmd = ['remove_files']
+            cmd += ['{' + ' '.join(removal) + '}']
+            self.p.cmd(' '.join(cmd))
     
     def add_fileset(self, name, fileset):
         if name:
@@ -165,7 +259,7 @@ class VivadoProject:
         if name:
             cmd += ['-of', '[get_filesets {' + name + '}]']
         
-        prjfiles = self.p.cmd(' '.join(cmd)).split('\n')[0]
+        prjfiles = self.p.cmd(' '.join(cmd)).split(' ')
         removal = []
         for f in prjfiles:
             if (f not in fileset) and (os.path.splitext(f)[1] != ".xci"):
@@ -218,17 +312,25 @@ class VivadoProject:
     
 class VivadoIpProject(VivadoProject):
 
-    def __init__(self, name, prjdir, ipdir, sources = OrderedDict(), config = OrderedDict()):
+    def __init__(self, name, prjdir, ipdir, sources = {}, ipconfig = {}, config = {}):
         self.ipdir = ipdir
+        self.ipconfig = ipconfig
         super().__init__(name=name, prjdir=prjdir, sources=sources, config=config)
 
+    def ipx_set_prop(self, name, val):
+        return self.p.cmd("set_property {name} {val} [ipx::current_core]".format(name=name, val=val))
+        
     def ipx_cmd(self, cmd, timeout=2):
         return self.p.cmd('ipx::{} [ipx::current_core]'.format(cmd), timeout=timeout)
     
     def configure(self):
         super().configure()
-        
+
         self.p.cmd('ipx::package_project -root_dir {}'.format(self.ipdir))
+
+        for k,v in self.ipconfig.items():
+            self.ipx_set_prop(k,v)
+
         self.ipx_cmd('save_core')
 
 class VivadoProjectBuild(Build):
@@ -237,11 +339,15 @@ class VivadoProjectBuild(Build):
                      ('name',      SrcConf()),
                      ('prjdir',    SrcConf()),
                      ('sources',   SrcConf('dict')),
+                     ('ips',       SrcConf('list')), 
                      ('config',    SrcConf('dict'))
                      ])
     
-    def __init__(self, name, prjdir, sources={}, config={}, **kwargs):
-        super().__init__(name=name, prjdir=prjdir, sources=sources, config=config, **kwargs)
+    def __init__(self, name, prjdir=None, sources={}, ips=[], config={}, **kwargs):
+        if prjdir is None:
+            prjdir = FileBuild(os.path.join('$BUILDDIR', name))
+            
+        super().__init__(name=name, prjdir=prjdir, sources=sources, ips=ips, config=config, **kwargs)
 
     def set_targets(self):
         return [self.res_file]
@@ -259,7 +365,8 @@ class VivadoProjectBuild(Build):
     def rebuild(self):
         res = VivadoProject(name        = self.srcres['name'], 
                             prjdir      = self.srcres['prjdir'],
-                            sources     = self.srcres['sources'], 
+                            sources     = self.srcres['sources'],
+                            ips         = self.srcres['ips'],
                             config      = self.srcres['config']
                            )
 #        res.clean()
@@ -269,20 +376,34 @@ class VivadoProjectBuild(Build):
 
 class VivadoIpProjectBuild(VivadoProjectBuild):
     srcs_setup = VivadoProjectBuild.srcs_setup.copy()
-    srcs_setup.update([('ipdir',   SrcConf()),
+    srcs_setup.update([
+                       ('ipdir',    SrcConf()),
+                       ('ipconfig', SrcConf('dict'))
                        ])
 
-    def __init__(self, name, prjdir, ipdir, sources={}, config={}, **kwargs):
-        super().__init__(name=name, prjdir=prjdir, ipdir=ipdir, sources=sources, config=config, **kwargs)
+    def __init__(self, name, ipdir, prjdir=None, sources={}, ipconfig = {}, config={}, **kwargs):
+        super().__init__(name=name, prjdir=prjdir, ipdir=ipdir, sources=sources, ipconfig=ipconfig, config=config, **kwargs)
 
     def rebuild(self):
         res = VivadoIpProject(name        = self.srcres['name'], 
                             prjdir      = self.srcres['prjdir'],
                             ipdir       = self.srcres['ipdir'],
-                            sources     = self.srcres['sources'], 
+                            sources     = self.srcres['sources'],
+                            ipconfig    = self.srcres['ipconfig'], 
                             config      = self.srcres['config']
                            )
 #        res.clean()
         res.configure()
 #         open(str(self.res_file), 'w')
         return res
+    
+class VivadoIpBuild(Build):
+    srcs_setup = Build.srcs_setup.copy()
+    srcs_setup.update([('ipprj',   SrcConf()),
+                       ])
+    
+    def __init__(self, ipprj, **kwargs):
+        super().__init__(ipprj=ipprj, **kwargs)
+        
+    def rebuild(self):
+        return self.srcres['ipprj'].ipdir

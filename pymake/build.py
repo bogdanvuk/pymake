@@ -149,8 +149,8 @@ class Build:
         self.build_src_env('env', self.srcs['env'])
 
         if target != 'all':
-            src_defs = target.partition('.')[0]
-            keys_src = src_defs.split(':')
+            child_def,_,subchild_target  = target.partition('.')
+            keys_src = child_def.split(':')
             src_name = keys_src[0]
             child = self.srcs[src_name]
             collection = self.srcs_setup.get(src_name, SrcConf()).collection
@@ -163,7 +163,10 @@ class Build:
                 keys.append[k]
                 child = child[k]
             
-            return self.build_src(src_name, child, collection, keys)
+            if not subchild_target:
+                return self.build_src(src_name, child, collection, keys)
+            else:
+                return child.build(target=subchild_target)
             
 
 #         self.builddir = self.set_environ_var('BUILDDIR', builddir, os.getcwd())
