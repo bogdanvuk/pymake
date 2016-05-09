@@ -9,7 +9,7 @@ class InteractInst:
     def __init__(self, runcmd, prompt):
         self.prompt = prompt
         self.runcmd = runcmd
-        self.p = pexpect.spawnu(self.runcmd, echo=False)
+        self.p = pexpect.spawnu(self.runcmd, echo=True)
 #         self.p.logfile = sys.stdout
         self.p.expect(self.prompt)
         self.hdr = self.p.before

@@ -129,7 +129,7 @@ class VivadoHlsProject:
         
         cflags = self.cflags
         if self.include:
-            cflags = ' '.join(['-I {}'.format(i) for i in self.include])
+            cflags = ' '.join([cflags] + ['-I {}'.format(i) for i in self.include])
         
         for f in self.sources:
             self.add_file(f, cflags=cflags)

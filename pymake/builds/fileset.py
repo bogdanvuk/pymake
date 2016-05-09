@@ -172,7 +172,7 @@ class FileCopyBuild(Build):
     def outdated(self):
         self.target_fileset = Fileset([os.path.join(str(self.srcres['dest']), f.basename) for f in self.srcres['src']])
         
-        if super().outdated() or (self.target_fileset.timestamp[1] < self.srcres['src'].timestamp[0]):
+        if super().outdated() or (self.target_fileset.timestamp[0] < self.srcres['src'].timestamp[1]):
             return True
     
     def rebuild(self):

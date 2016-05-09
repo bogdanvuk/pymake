@@ -259,7 +259,9 @@ class VivadoProject:
         if name:
             cmd += ['-of', '[get_filesets {' + name + '}]']
         
-        prjfiles = self.p.cmd(' '.join(cmd)).split(' ')
+        resp = self.p.cmd(' '.join(cmd))
+        resp_lines = resp.split('\n')
+        prjfiles = resp_lines[1].split(' ') # skip the echoed command in first line
         removal = []
         for f in prjfiles:
             if (f not in fileset) and (os.path.splitext(f)[1] != ".xci"):
@@ -312,9 +314,10 @@ class VivadoProject:
     
 class VivadoIpProject(VivadoProject):
 
-    def __init__(self, name, prjdir, ipdir, sources = {}, ipconfig = {}, config = {}):
+    def __init__(self, name, prjdir, ipdir, sources = {}, ipconfig = {}, config = {}, tclpack = None):
         self.ipdir = ipdir
         self.ipconfig = ipconfig
+        self.tclpack = tclpack
         super().__init__(name=name, prjdir=prjdir, sources=sources, config=config)
 
     def ipx_set_prop(self, name, val):
@@ -330,6 +333,9 @@ class VivadoIpProject(VivadoProject):
 
         for k,v in self.ipconfig.items():
             self.ipx_set_prop(k,v)
+            
+        if self.tclpack:
+            self.p.cmd('source {fn}'.format(fn=str(self.tclpack)))
 
         self.ipx_cmd('save_core')
 
@@ -378,11 +384,12 @@ class VivadoIpProjectBuild(VivadoProjectBuild):
     srcs_setup = VivadoProjectBuild.srcs_setup.copy()
     srcs_setup.update([
                        ('ipdir',    SrcConf()),
-                       ('ipconfig', SrcConf('dict'))
+                       ('ipconfig', SrcConf('dict')),
+                       ('tclpack',  SrcConf())
                        ])
 
-    def __init__(self, name, ipdir, prjdir=None, sources={}, ipconfig = {}, config={}, **kwargs):
-        super().__init__(name=name, prjdir=prjdir, ipdir=ipdir, sources=sources, ipconfig=ipconfig, config=config, **kwargs)
+    def __init__(self, name, ipdir, prjdir=None, sources={}, ipconfig = {}, config={}, tclpack=None, **kwargs):
+        super().__init__(name=name, prjdir=prjdir, ipdir=ipdir, sources=sources, ipconfig=ipconfig, config=config, tclpack=tclpack, **kwargs)
 
     def rebuild(self):
         res = VivadoIpProject(name        = self.srcres['name'], 
@@ -390,7 +397,8 @@ class VivadoIpProjectBuild(VivadoProjectBuild):
                             ipdir       = self.srcres['ipdir'],
                             sources     = self.srcres['sources'],
                             ipconfig    = self.srcres['ipconfig'], 
-                            config      = self.srcres['config']
+                            config      = self.srcres['config'],
+                            tclpack     = self.srcres['tclpack']
                            )
 #        res.clean()
         res.configure()
